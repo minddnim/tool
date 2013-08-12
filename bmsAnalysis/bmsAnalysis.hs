@@ -1,59 +1,62 @@
-import Control.Monad
+import Control.Monad()
 import Text.Printf
-import Control.Applicative
+import Control.Applicative()
+import Data.Map as M
+import Data.List as L
 
-type KeysNum = (Int, Int, Int, Int, Int, Int, Int, Int)
+type Field = Map String Int
+
+(key1, key2, key3, key4, key5, key6, key7, scr) = ("11","12","13","14","15","18","19","16")
+(lkey1, lkey2, lkey3, lkey4, lkey5, lkey6, lkey7, lscr) = ("51","52","53","54","55","58","59","56")
+
+initObj = M.fromList [(key1, 0),  (key2, 0),  (key3, 0),  (key4, 0),  (key5, 0),  (key6, 0),  (key7, 0),  (scr, 0),
+                      (lkey1, 0), (lkey2, 0), (lkey3, 0), (lkey4, 0), (lkey5, 0), (lkey6, 0), (lkey7, 0), (lscr, 0)]
 
 main :: IO()
 main = do
   contents <- getContents
-  let (k1, k2, k3, k4, k5, k6, k7, scr) = bmsAnalysis $ lines contents
-  printf "k1  : %d\n" k1
-  printf "k2  : %d\n" k2
-  printf "k3  : %d\n" k3
-  printf "k4  : %d\n" k4
-  printf "k5  : %d\n" k5
-  printf "k6  : %d\n" k6
-  printf "k7  : %d\n" k7
-  printf "scr : %d\n" scr
+  let objData = bmsAnalysis (lines contents) []
+  printf "k1  : %d\n" $ (objData ! key1) + (objData ! lkey1 `div` 2)
+  printf "k2  : %d\n" $ (objData ! key2) + (objData ! lkey2 `div` 2)
+  printf "k3  : %d\n" $ (objData ! key3) + (objData ! lkey3 `div` 2)
+  printf "k4  : %d\n" $ (objData ! key4) + (objData ! lkey4 `div` 2)
+  printf "k5  : %d\n" $ (objData ! key5) + (objData ! lkey5 `div` 2)
+  printf "k6  : %d\n" $ (objData ! key6) + (objData ! lkey6 `div` 2)
+  printf "k7  : %d\n" $ (objData ! key7) + (objData ! lkey7 `div` 2)
+  printf "scr : %d\n" $ (objData ! scr)  + (objData ! lscr  `div` 2)
 
-bmsAnalysis :: [String] -> KeysNum
-bmsAnalysis cs = bmsAnalysis' cs (0, 0, 0, 0, 0, 0, 0, 0) (0, 0, 0, 0, 0, 0, 0, 0) []
-  where bmsAnalysis' [] ret lret _ = (0, 0, 0, 0, 0, 0, 0, 0)
-        bmsAnalysis' (c:cs) ret lret lObj | take 6 c == "#LNOBJ" = objAnalysis (c:cs) ret lret ((drop 7 c):lObj)
-                                          | elem ':' c = objAnalysis (c:cs) ret lret lObj
-                                          | otherwise = bmsAnalysis' cs ret lret lObj
+-- bmsファイルからbmsデータ解析
+bmsAnalysis :: [String] -> [String] -> Field
+bmsAnalysis [] _ = initObj
+bmsAnalysis (c:cs) lnIdList | isLnDef = bmsAnalysis cs (lnId:lnIdList)
+                            | isEmptyList = bmsAnalysis cs lnIdList
+                            | isFieldDef = laneAnalysis (c:cs) lnIdList initObj
+                            | otherwise = bmsAnalysis cs lnIdList
+  where isLnDef = take 6 c == "#LNOBJ"
+        isEmptyList = L.null c
+        isFieldDef = (head c == '#') && (last (take 7 c)) == ':'
+        lnId = drop 7 c
 
-objAnalysis :: [String] -> KeysNum -> KeysNum -> [String] -> KeysNum
-objAnalysis [] (k1, k2, k3, k4, k5, k6, k7, scr) (lk1, lk2, lk3, lk4, lk5, lk6, lk7, lscr) _ = (k1+(lk1 `div` 2), k2+(lk2 `div` 2), k3+(lk3 `div` 2), k4+(lk4 `div` 2), k5+(lk5 `div` 2), k6+(lk6 `div` 2), k7+(lk7 `div` 2), scr+(lscr `div` 2))
-objAnalysis (c:cs) ret@(k1, k2, k3, k4, k5, k6, k7, scr) lret@(lk1, lk2, lk3, lk4, lk5, lk6, lk7, lscr) lObj | key == "11" = objAnalysis cs (k1+objCnt, k2, k3, k4, k5, k6, k7, scr) lret lObj
-                                                                                                             | key == "12" = objAnalysis cs (k1, k2+objCnt, k3, k4, k5, k6, k7, scr) lret lObj
-                                                                                                             | key == "13" = objAnalysis cs (k1, k2, k3+objCnt, k4, k5, k6, k7, scr) lret lObj
-                                                                                                             | key == "14" = objAnalysis cs (k1, k2, k3, k4+objCnt, k5, k6, k7, scr) lret lObj
-                                                                                                             | key == "15" = objAnalysis cs (k1, k2, k3, k4, k5+objCnt, k6, k7, scr) lret lObj
-                                                                                                             | key == "18" = objAnalysis cs (k1, k2, k3, k4, k5, k6+objCnt, k7, scr) lret lObj
-                                                                                                             | key == "19" = objAnalysis cs (k1, k2, k3, k4, k5, k6, k7+objCnt, scr) lret lObj
-                                                                                                             | key == "16" = objAnalysis cs (k1, k2, k3, k4, k5, k6, k7, scr+objCnt) lret lObj
-                                                                                                             | key == "51" = objAnalysis cs ret (lk1+lnObjCnt, lk2, lk3, lk4, lk5, lk6, lk7, lscr) lObj
-                                                                                                             | key == "52" = objAnalysis cs ret (lk1, lk2+lnObjCnt, lk3, lk4, lk5, lk6, lk7, lscr) lObj
-                                                                                                             | key == "53" = objAnalysis cs ret (lk1, lk2, lk3+lnObjCnt, lk4, lk5, lk6, lk7, lscr) lObj
-                                                                                                             | key == "54" = objAnalysis cs ret (lk1, lk2, lk3, lk4+lnObjCnt, lk5, lk6, lk7, lscr) lObj
-                                                                                                             | key == "55" = objAnalysis cs ret (lk1, lk2, lk3, lk4, lk5+lnObjCnt, lk6, lk7, lscr) lObj
-                                                                                                             | key == "58" = objAnalysis cs ret (lk1, lk2, lk3, lk4, lk5, lk6+lnObjCnt, lk7, lscr) lObj
-                                                                                                             | key == "59" = objAnalysis cs ret (lk1, lk2, lk3, lk4, lk5, lk6, lk7+lnObjCnt, lscr) lObj
-                                                                                                             | key == "56" = objAnalysis cs ret (lk1, lk2, lk3, lk4, lk5, lk6, lk7, lscr+lnObjCnt) lObj
-                                                                                                             | otherwise = objAnalysis cs ret lret lObj
-  where (bar, key) =  splitAt 3 (tail barKey)
-        objCnt = objNum objData lObj
-        objData = tail objData'
-        (barKey, objData') | elem ':' c = break (==':') c
-                           | otherwise = ("#", ":")
-        lnObjCnt = objNum objData lObj
+-- #xxxyy:zzzzzzzzzzzzzzzzという文字列を解析 xは小節数, yはkeyId, zはオブジェ情報
+laneAnalysis :: [String] -> [String] -> Field -> Field
+laneAnalysis [] _ objMap = objMap
+laneAnalysis (c:cs) lnIdList objMap = laneAnalysis cs lnIdList updateObj
+  where keyId = take 2 $ drop 4 c
+        obInfo = createObjInfo $ drop 7 c
+        objNum = cntObj obInfo lnIdList
+        updateObj = insertWith (+) keyId objNum objMap
 
-objNum :: String -> [String] -> Int
-objNum dt lObj = objNum' dt 0
-  where  objNum' [] num = num
-         objNum' (x:y:dt) num | (x == '0' && y == '0') || elem (x:y:[]) lObj = objNum' dt num
-                              | otherwise = objNum' dt (num+1)  
+-- 1小節に定義されているオブジェ情報の作成
+createObjInfo :: String -> [String]
+createObjInfo dt = createObjInfo' dt []
+  where createObjInfo' [] obInfo = obInfo
+        createObjInfo' dat@(_:_:xs) obInfo = createObjInfo' xs ((take 2 dat) : obInfo)
+        createObjInfo' _ _ = []
 
-
+-- オブジェ情報から、配置されているオブジェ数をカウント(拡張定義されたLNオブジェを除く)
+cntObj :: [String] -> [String] -> Int
+cntObj obInfo lObj = length $ L.foldr (delLnObj) [] obData -- ここを修正する必要がある
+  where obData = L.filter (/="00") obInfo
+        delLnObj x y | elem x lObj = y
+                     | otherwise = (x:y)
+ 
