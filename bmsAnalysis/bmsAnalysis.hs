@@ -3,6 +3,7 @@ import Text.Printf
 import Control.Applicative()
 import Data.Map as M
 import Data.List as L
+import System.Environment(getArgs)
 
 type Field = Map String Int
 
@@ -14,7 +15,8 @@ initObj = M.fromList [(key1, 0),  (key2, 0),  (key3, 0),  (key4, 0),  (key5, 0),
 
 main :: IO()
 main = do
-  contents <- getContents
+  args <- getArgs
+  contents <- (readFile (head args))
   let objData = bmsAnalysis (lines contents) []
   printf "k1  : %d\n" $ (objData ! key1) + (objData ! lkey1 `div` 2)
   printf "k2  : %d\n" $ (objData ! key2) + (objData ! lkey2 `div` 2)
@@ -24,6 +26,8 @@ main = do
   printf "k6  : %d\n" $ (objData ! key6) + (objData ! lkey6 `div` 2)
   printf "k7  : %d\n" $ (objData ! key7) + (objData ! lkey7 `div` 2)
   printf "scr : %d\n" $ (objData ! scr)  + (objData ! lscr  `div` 2)
+  a <- getLine
+  print a
 
 -- bmsファイルからbmsデータ解析
 bmsAnalysis :: [String] -> [String] -> Field
@@ -55,7 +59,7 @@ createObjInfo dt = createObjInfo' dt []
 
 -- オブジェ情報から、配置されているオブジェ数をカウント(拡張定義されたLNオブジェを除く)
 cntObj :: [String] -> [String] -> Int
-cntObj obInfo lObj = length $ L.foldr (delLnObj) [] obData -- ここを修正する必要がある
+cntObj obInfo lObj = length $ L.foldr (delLnObj) [] obData
   where obData = L.filter (/="00") obInfo
         delLnObj x y | elem x lObj = y
                      | otherwise = (x:y)
