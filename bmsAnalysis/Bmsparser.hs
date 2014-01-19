@@ -1,99 +1,126 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Bmsparser
-( CntObjKey(..)
-, getCntObjKey
-) where
+{-
+bmsファイルの構造について・・・
+bmsファイルは大きく分けて
+ヘッダーフィールドとメインデータフィールドがある
+ヘッダーフィールドは曲名やキー音の定義、BGMの定義等が記述されている
+メインデータフィールドは、どの小節のどの位置に何のキー音を再生するかという情報が書かれている
+(簡単に言うとオブジェの位置定義)
 
-import Data.ByteString.Char8 as B (ByteString, unpack, pack)
-import Data.Attoparsec.Char8
-import Data.Word
-import System.IO
-import Control.Applicative
-import Data.Map as M
-import Data.List as L
-
-data FieldData = FieldData { channel :: String
-                           , keyID :: String
-                           , objs :: [String]
-                           } deriving (Show)
-
-data CntObjKey = CntObjKey { nKey1 :: Int
-                           , nKey2 :: Int
-                           , nKey3 :: Int
-                           , nKey4 :: Int
-                           , nKey5 :: Int
-                           , nKey6 :: Int
-                           , nKey7 :: Int
-                           , nScr  :: Int
-                           } deriving (Show)
-
-type Field = Map String Int
-
--- 各キーのkeyIDの割り当て
+メインデータフィールドの構造について書く
+各キーのIDは以下の通り
 (k1, k2, k3, k4, k5, k6, k7, scr) = ("11","12","13","14","15","18","19","16")
+
+ロングノート時の各キーのIDは以下の通り
 (lk1, lk2, lk3, lk4, lk5, lk6, lk7, lscr) = ("51","52","53","54","55","58","59","56")
 
--- 各キーのオブジェの個数をカウント
-initObj = M.fromList [(k1, 0),  (k2, 0),  (k3, 0),  (k4, 0),  (k5, 0),  (k6, 0),  (k7, 0),  (scr, 0),
-                      (lk1, 0), (lk2, 0), (lk3, 0), (lk4, 0), (lk5, 0), (lk6, 0), (lk7, 0), (lscr, 0)]
+オブジェ定義のフォーマットとしては以下のような仕様である。
+#00111:07080708
+これは001小節目のキーID11番(つまり1番ボタン)に4分のリズムでオブジェが4個降ってくる
+#の次の3つ分の数字は小節数、次の2文字はキーID、
+「:」以降の数字は2個で1セットとなっていて、
+その1セットが01からZZまでの文字列のときにオブジェと認識。
 
-getCntObjKey :: [String] -> CntObjKey
-getCntObjKey cs = CntObjKey oKey1 oKey2 oKey3 oKey4 oKey5 oKey6 oKey7 oScr
-  where fld = bmsAnalysis cs []
-        oKey1 = (fld ! k1)  + (fld ! lk1 `div` 2)
-        oKey2 = (fld ! k2)  + (fld ! lk2 `div` 2)
-        oKey3 = (fld ! k3)  + (fld ! lk3 `div` 2)
-        oKey4 = (fld ! k4)  + (fld ! lk4 `div` 2)
-        oKey5 = (fld ! k5)  + (fld ! lk5 `div` 2)
-        oKey6 = (fld ! k6)  + (fld ! lk6 `div` 2)
-        oKey7 = (fld ! k7)  + (fld ! lk7 `div` 2)
-        oScr  = (fld ! scr) + (fld ! lscr `div` 2)
+-}
 
--- bmsファイルからbmsデータ解析
-bmsAnalysis :: [String] -> [String] -> Field
-bmsAnalysis [] _ = initObj
-bmsAnalysis (c:cs) lnIdList | isLnDef = bmsAnalysis cs (lnId:lnIdList)
-                            | isEmptyList = bmsAnalysis cs lnIdList
-                            | isFieldDef = laneAnalysis (c:cs) lnIdList initObj
-                            | otherwise = bmsAnalysis cs lnIdList
-  where isLnDef = Prelude.take 6 c == "#LNOBJ"
-        isEmptyList = L.null c
-        isFieldDef = (head c == '#') && (last (Prelude.take 7 c)) == ':'
-        lnId = drop 7 c
+module Bmsparser
+(
+  getMainDataField
+) where
 
--- #xxxyy:zzzzzzzzzzzzzzzzという文字列を解析 xは小節数, yはkeyId, zはオブジェ情報
-laneAnalysis :: [String] -> [String] -> Field -> Field
-laneAnalysis [] _ objMap = objMap
-laneAnalysis (c:cs) lnIdList objMap = laneAnalysis cs lnIdList updateObj
-  where fData = getFieldData c
-        keyId = keyID fData
-        obInfo = objs fData
-        objNum = cntObj obInfo lnIdList
-        updateObj = insertWith (+) keyId objNum objMap
+import Data.List as L (zip)
+import Data.Text as T (Text, length, chunksOf, pack)
+import Data.Attoparsec.Text as T
+import Control.Applicative
 
--- オブジェ情報から、配置されているオブジェ数をカウント(拡張定義されたLNオブジェを除く)
-cntObj :: [String] -> [String] -> Int
-cntObj obInfo lObj = length $ L.foldr (delLnObj) [] obData
-  where obData = L.filter (/="00") obInfo
-        delLnObj x y | elem x lObj = y
-                     | otherwise = (x:y)
+data WavDef = WavDef {
+  getWavId :: Text,
+  getWavFileName :: Text
+}
 
--- #xxxyy:zzzzzzzzという文字列から"xxx" "yy" ["zz", "zz", "zz", "zz"] というデータを得る
-getFieldData :: String -> FieldData
-getFieldData str =
-  case result of
-    Left _ -> error "bmsParser error."
-    Right a -> a
-  where result = parseOnly bmsParser (B.pack str)
+data HeaderField = HeaderField {
+  getGenre :: Text,
+  getTitle :: Text,
+  getArtist :: Text,
+  getBpm :: Text,
+  getPlayLevel :: Text,
+  getRank :: Text,
+  getTotal :: Text,
+  getWavDefSet :: [WavDef]
+}
 
--- #xxxyy:zzzzzzzzという文字列を解析 xは小節数, yはkeyId, zはオブジェ情報
-bmsParser :: Parser FieldData
-bmsParser = do
+data MainDataField = MainDataField {
+  getKId :: Text,
+  getBar :: Text,
+  getRhythm :: Int,
+  getObjs :: [Obj]
+} deriving (Show)
+
+type Pos = Int
+type WavId = Text
+type Obj = (Pos, WavId)
+
+title :: Parser Text
+title = string "#TITLE"
+
+artist :: Parser Text
+artist = string "#ARTIST"
+
+bpm :: Parser Text
+bpm = string "#BPM"
+
+playlevel :: Parser Text
+playlevel = string "#PLAYLEVEL"
+
+rank :: Parser Text
+rank = string "#RANK"
+
+total :: Parser Text
+total = string "#TOTAL"
+
+wav :: Parser Text
+wav = string "#WAV"
+
+lnObj :: Parser Text
+lnObj = string "#LNOBJ"
+
+pHFData :: Parser Text -> Parser Text
+pHFData p = p *> skipSpace *> takeTill isEndOfLine <* endOfLine
+
+pLnObjDef :: Parser Text
+pLnObjDef = lnObj *> char ':' *> takeTill isEndOfLine <* endOfLine
+
+pMFDatas :: Parser [MainDataField]
+pMFDatas = many pMFData
+
+pMFData :: Parser MainDataField
+pMFData = do
   char '#'
-  channel <- count 3 anyChar  
-  keyId <- count 2 anyChar
+  bar <- T.take 3
+  kId <- T.take 2
   char ':'
-  objs <- many $ count 2 anyChar
-  return $ FieldData channel keyId objs
+  dat <- takeTill isEndOfLine
+  many endOfLine
+  let rhythm = convRhythm dat
+      objs = convObjs dat
+  return $ MainDataField kId bar rhythm objs
+
+convRhythm :: Text -> Int
+convRhythm x = (T.length x) `div` 2
+
+convObjs :: Text -> [Obj]
+convObjs dat = [x | x <- objsData, snd x /= "00"]
+  where objData = 2 `chunksOf` dat
+        objsData = L.zip [1..] objData
+
+getMainDataField :: String -> [MainDataField]
+getMainDataField cont = case parseOnly pMFDatas (T.pack cont) of
+  Left _ -> error "Parse Error."
+  Right results -> results
+
+main :: IO ()
+--main = print $ parseOnly (pHFData title) "#TITLE adfdsfadsf"
+main = print $ parseOnly pMFData "#00201:0026002600260026\n"
+
 
