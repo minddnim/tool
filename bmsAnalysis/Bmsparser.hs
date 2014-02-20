@@ -26,13 +26,14 @@ bmsファイルは大きく分けて
 
 module Bmsparser
 (
-  partitionObjAndOtherObj,
   convAllScr,
-  convAllScr',
-  getMainDataField
+  getMainDataField,
+  getMusicTitle,
+  getCntObjKeys,
+  getTotalValue
 ) where
 
-import qualified Data.List as L (zip, partition, length, filter)
+import qualified Data.List as L (zip, partition, length, filter, isPrefixOf)
 import qualified Data.Map.Lazy as M
 import Data.Text as T (Text, length, chunksOf, pack, unpack, append, concat)
 import Data.Attoparsec.Text as T
@@ -49,6 +50,110 @@ type ObjInfo = (Pos, WavId)
 type Pos = Int
 type WavId = Text
 
+-- HeaderField Process
+data WavDef = WavDef {
+  getWavId :: Text,
+  getWavFileName :: Text
+}
+
+data HeaderField = HeaderField {
+  getGenre :: Text,
+  getTitle :: Text,
+  getArtist :: Text,
+  getBpm :: Text,
+  getPlayLevel :: Text,
+  getRank :: Text,
+  getTotal :: Text,
+  getWavDefSet :: [WavDef]
+}
+
+(k1, k2, k3, k4, k5, k6, k7, scr) = ("11","12","13","14","15","18","19","16")
+(lk1, lk2, lk3, lk4, lk5, lk6, lk7, lscr) = ("51","52","53","54","55","58","59","56")
+
+-- 鍵盤と皿のID
+ksId :: [Text]
+ksId = [k1,k2,k3,k4,k5,k6,k7,scr]
+
+-- 鍵盤と皿のID(ロングノート)
+lksId :: [Text]
+lksId = [lk1,lk2,lk3,lk4,lk5,lk6,lk7,lscr]
+
+
+title :: Parser Text
+title = string "#TITLE"
+
+artist :: Parser Text
+artist = string "#ARTIST"
+
+bpm :: Parser Text
+bpm = string "#BPM"
+
+playlevel :: Parser Text
+playlevel = string "#PLAYLEVEL"
+
+rank :: Parser Text
+rank = string "#RANK"
+
+total :: Parser Text
+total = string "#TOTAL"
+
+wav :: Parser Text
+wav = string "#WAV"
+
+lnObj :: Parser Text
+lnObj = string "#LNOBJ"
+
+pHFData :: Parser Text -> Parser Text
+pHFData p = p *> skipSpace *> takeTill isEndOfLine <* endOfLine
+
+pLnObjDef :: Parser Text
+pLnObjDef = lnObj *> char ':' *> takeTill isEndOfLine <* endOfLine
+
+headerFieldStartStr :: String
+headerFieldStartStr = "*---------------------- HEADER FIELD"
+
+mainDataFieldStartStr :: String
+mainDataFieldStartStr = "*---------------------- MAIN DATA FIELD"
+
+divHeaderAndMain :: String -> (String, String)
+divHeaderAndMain str = (unlines headerStrs, unlines mainDataStrs)
+  where strs = lines str
+        (headerStrs, mainDataStrs) = span (mainDataFieldStartStr /=) strs
+
+convAllScr :: String -> String
+convAllScr str = convAllScrStrHeader ++ (unlines notKey) ++ convAllScrStrMain
+  where (headerStr, mainDataStr) = divHeaderAndMain str
+        (key, notKey) = L.partition (\x -> Prelude.take 2 (Prelude.drop 4 x) `elem` (map unpack ksId)) $ lines mainDataStr
+        convAllScrStrHeader = unlines $ convAllScrHeader $ lines headerStr
+        convAllScrStrMain = convAllScrData $ getMainDataField (unlines key)
+
+getMusicTitle :: String -> String
+getMusicTitle str = drop 7 $ getMusicTitle' $ lines str
+  where getMusicTitle' [] = ""
+        getMusicTitle' (x:xs) | "#TITLE " `L.isPrefixOf` x = x
+                              | otherwise = getMusicTitle' xs
+
+getTotalValue :: String -> Int
+getTotalValue str = read $ drop 7 $ getMusicTitle' $ lines str
+  where getMusicTitle' [] = ""
+        getMusicTitle' (x:xs) | "#TOTAL " `L.isPrefixOf` x = x
+                              | otherwise = getMusicTitle' xs
+
+-- HeaderDataField Process
+convAllScrHeader :: [String] -> [String]
+convAllScrHeader x = convAllScrHeader' x []
+  where convAllScrHeader' [] ret = reverse ret
+        convAllScrHeader' (x:xs) ret | "#TITLE " `L.isPrefixOf` x = convAllScrHeader' xs ((x++"_ALLSCR ver"):ret)
+                                     | "#ARTIST " `L.isPrefixOf` x = convAllScrHeader' xs ((x++" / modified to ASCR_Tool"):ret)
+                                     | otherwise = convAllScrHeader' xs (x:ret)
+
+getLNOBJIDs :: String -> [WavId]
+getLNOBJIDs str = getLNOBJID defLNOBJs []
+  where defLNOBJs = filter (\x -> "#LNOBJ " `L.isPrefixOf` x) $ lines str
+        getLNOBJID [] ret = ret
+        getLNOBJID (x:xs) ret = getLNOBJID xs (T.pack (drop 7 x):ret)
+
+
 -- MainDataField Process
 getMainDataField :: String -> [MainDataField]
 getMainDataField cont = case parseOnly pMFDatas (T.pack cont) of
@@ -56,7 +161,10 @@ getMainDataField cont = case parseOnly pMFDatas (T.pack cont) of
   Right results -> results
 
 pMFDatas :: Parser [MainDataField]
-pMFDatas = many pMFData
+pMFDatas = do
+--  string $ T.pack mainDataFieldStartStr
+  many endOfLine
+  many pMFData
 
 pMFData :: Parser MainDataField
 pMFData = do
@@ -77,6 +185,50 @@ convObjs :: Text -> [ObjInfo]
 convObjs dat = filter (\(x, y) -> y /= "00") objsData
   where objData = 2 `chunksOf` dat
         objsData = L.zip [0..] objData
+
+-- ObjCount Process
+getCntObjKeys :: String -> (Int, Int, Int, Int, Int, Int, Int, Int)
+getCntObjKeys str = getCntObjKeysTpl lnObjs mData
+  where (headerStr, mainDataStr) = divHeaderAndMain str
+        lnObjs = getLNOBJIDs headerStr
+        mData = getMainDataField mainDataStr
+
+cntObjKey :: [WavId] -> Text -> [MainDataField] -> Int
+--cntObjKey lnObjs k mds = L.length (L.intersect keyObjs lnObjs)-- 数えるときにLNOBJのIDを抜いて計算
+cntObjKey lnObjs k mds = L.length (filter (\x -> x `notElem` lnObjs) keyObjs)-- 数えるときにLNOBJのIDを抜いて計算
+  where getKeyAndObj md = (getKId md, getObjs md)
+        keyAndObjs = map getKeyAndObj mds
+        keyObjs = map snd $ Prelude.concat $ map snd $ filter (\x -> k == fst x) keyAndObjs
+
+getCntObjKeysTpl :: [WavId] -> [MainDataField] -> (Int, Int, Int, Int, Int, Int, Int, Int)
+getCntObjKeysTpl lnObjs mds = (c1, c2, c3, c4, c5, c6, c7, cScr)
+  where cntObjKeyRemLnObj = cntObjKey lnObjs
+        cntObj1Key = cntObjKeyRemLnObj k1 mds 
+        cntObjL1Key = (cntObjKeyRemLnObj lk1 mds) `div` 2
+        c1 = cntObj1Key + cntObjL1Key
+        cntObj2Key = cntObjKeyRemLnObj k2 mds 
+        cntObjL2Key = (cntObjKeyRemLnObj lk2 mds) `div` 2
+        c2 = cntObj2Key + cntObjL2Key
+        cntObj3Key = cntObjKeyRemLnObj k3 mds 
+        cntObjL3Key = (cntObjKeyRemLnObj lk3 mds) `div` 2
+        c3 = cntObj3Key + cntObjL3Key
+        cntObj4Key = cntObjKeyRemLnObj k4 mds 
+        cntObjL4Key = (cntObjKeyRemLnObj lk4 mds) `div` 2
+        c4 = cntObj4Key + cntObjL4Key
+        cntObj5Key = cntObjKeyRemLnObj k5 mds 
+        cntObjL5Key = (cntObjKeyRemLnObj lk5 mds) `div` 2
+        c5 = cntObj5Key + cntObjL5Key
+        cntObj6Key = cntObjKeyRemLnObj k6 mds 
+        cntObjL6Key = (cntObjKeyRemLnObj lk6 mds) `div` 2
+        c6 = cntObj6Key + cntObjL6Key
+        cntObj7Key = cntObjKeyRemLnObj k7 mds 
+        cntObjL7Key = (cntObjKeyRemLnObj lk7 mds) `div` 2
+        c7 = cntObj7Key + cntObjL7Key
+        cntObjScrKey = cntObjKeyRemLnObj scr mds 
+        cntObjLScrKey = (cntObjKeyRemLnObj lscr mds) `div` 2
+        cScr = cntObjScrKey + cntObjLScrKey
+
+
 
 -- ALLSCR Process
 type BarContentMap = M.Map Bar KeyLanes
@@ -111,15 +263,8 @@ getObjsStr 0 _ r = r
 getObjsStr n objMap ret = getObjsStr (n-1) objMap (objWavId `T.append` ret)
   where objWavId = M.findWithDefault "00" (n-1) objMap 
 
-
-convAllScr :: [MainDataField] -> String
-convAllScr md = convMainDataFieldsToBmsData $ L.filter (\x -> getObjs x /= []) $ convBarContentsToMDFileds bContents mdOther
-  where (mdKeyScr, mdOther) = partitionObjAndOtherObj md 
-        bContentMap = convMDFiledsToBarContents mdKeyScr
-        bContents = convToAllscrDatas bContentMap
-
-convAllScr' :: [MainDataField] -> [MainDataField]
-convAllScr' md = convBarContentsToMDFileds bContents mdOther
+convAllScrData :: [MainDataField] -> String
+convAllScrData md = convMainDataFieldsToBmsData $ L.filter (\x -> getObjs x /= []) $ convBarContentsToMDFileds bContents mdOther
   where (mdKeyScr, mdOther) = partitionObjAndOtherObj md 
         bContentMap = convMDFiledsToBarContents mdKeyScr
         bContents = convToAllscrDatas bContentMap
@@ -152,12 +297,6 @@ convKeyLaneListToMainDataField b (x:xs) ret = convKeyLaneListToMainDataField b x
         (keyId, rhythm) = keyInfo
         md = MainDataField b keyId rhythm objs
 
-(k1, k2, k3, k4, k5, k6, k7, scr) = ("11","12","13","14","15","18","19","16")
-
--- 鍵盤と皿のID
-ksId :: [Text]
-ksId = k1:k2:k3:k4:k5:k6:k7:scr:[]
-
 -- 鍵盤と皿、その他で分ける
 partitionObjAndOtherObj :: [MainDataField] -> ([MainDataField], [MainDataField])
 partitionObjAndOtherObj = L.partition (\x -> getKId x `elem` ksId) 
@@ -186,11 +325,6 @@ convKeyLanes kls = M.fromList (retScrLane:retOrgLane)
         getScrLaneListHead = if L.length scrLaneList == 0 then (("16",1), []) else head scrLaneList
         kLanesList = M.toDescList kLanes
         (retOrgLane, retScrLane) = moveLanesObjToScr kLanesList addScrLane ([], addScrLane)
-
--- Debug用関数
-
-
--- ここまで
 
 -- 皿のレーンに移動させた後の譜面の状態が（鍵盤側, 皿側）で返ってくる --OK
 moveLanesObjToScr :: [KeyLane] -> KeyLane -> ([KeyLane], KeyLane) -> ([KeyLane], KeyLane)
@@ -227,65 +361,3 @@ canObjMove (kInfo1, oInfo) (kInfo2, osInfo) = p1 `notElem` ps2
         commonRhythm = lcm rhythm1 rhythm2
         p1 = (commonRhythm `div` rhythm1) * (fst oInfo)
         ps2 = map ((commonRhythm `div` rhythm2) *) $ map fst osInfo
-
-main :: IO ()
---main = print $ parseOnly (pHFData title) "#TITLE adfdsfadsf"
---main = print $ convToAllscrDatas $ convMDFiledsToBarContents $ getMainDataField "#00511:0505\n#00512:00000017000018001N00001P0000001T\n#00516:0808\n"
-main = print $ convToAllscrDatas $ convMDFiledsToBarContents $ getMainDataField "#00511:0505\n#00512:00000017000018001N00001P0000001T\n#00513:1I0000001800001M00000000001D0000\n#00514:3I00001L001C00003H0000001Q000014\n#00515:0000001L0000001S\n#00516:0808\n#00518:2Q0000001J0000002R000014001R0000\n#00519:00000000001K00190000000016001700\n"
---main = print $ convToAllscrDatas $ convMDFiledsToBarContents $ getMainDataField "#00516:0505\n#00512:00000017000018001N00001P0000001T\n"
-
-
-
-
-
-
-
-
-
-
-
-data WavDef = WavDef {
-  getWavId :: Text,
-  getWavFileName :: Text
-}
-
-data HeaderField = HeaderField {
-  getGenre :: Text,
-  getTitle :: Text,
-  getArtist :: Text,
-  getBpm :: Text,
-  getPlayLevel :: Text,
-  getRank :: Text,
-  getTotal :: Text,
-  getWavDefSet :: [WavDef]
-}
-
-title :: Parser Text
-title = string "#TITLE"
-
-artist :: Parser Text
-artist = string "#ARTIST"
-
-bpm :: Parser Text
-bpm = string "#BPM"
-
-playlevel :: Parser Text
-playlevel = string "#PLAYLEVEL"
-
-rank :: Parser Text
-rank = string "#RANK"
-
-total :: Parser Text
-total = string "#TOTAL"
-
-wav :: Parser Text
-wav = string "#WAV"
-
-lnObj :: Parser Text
-lnObj = string "#LNOBJ"
-
-pHFData :: Parser Text -> Parser Text
-pHFData p = p *> skipSpace *> takeTill isEndOfLine <* endOfLine
-
-pLnObjDef :: Parser Text
-pLnObjDef = lnObj *> char ':' *> takeTill isEndOfLine <* endOfLine
